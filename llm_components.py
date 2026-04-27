@@ -21,7 +21,7 @@ from typing import Optional
 import anthropic
 
 CLIENT = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-5-20250929"
 MAX_TOKENS = 1000
 
 # ---------------------------------------------------------------------------
