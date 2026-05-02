@@ -10,7 +10,11 @@ import os
 from typing import Any
 
 import joblib
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
+import shap
 import streamlit as st
 
 # Pull API key from Streamlit secrets if present, before importing llm_components
@@ -39,6 +43,10 @@ def load_model_and_meta() -> tuple[Any, dict]:
     with open("rpe_model_meta.json") as f:
         meta = json.load(f)
     return model, meta
+@st.cache_resource(show_spinner=False)
+def load_shap_explainer(_model) -> shap.TreeExplainer:
+    """Load once at startup. Underscore prefix tells Streamlit not to hash the model."""
+    return shap.TreeExplainer(_model)
 
 
 # --------------------------------------------------------------------------
@@ -71,6 +79,12 @@ try:
 except Exception as e:
     st.error(f"Failed to load the model files: {e}")
     st.stop()
+
+try:
+    explainer = load_shap_explainer(model)
+except Exception as e:
+    explainer = None
+    st.caption(f"(SHAP explainer failed to load: {e}. Predictions will still work.)")
 
 
 # --------------------------------------------------------------------------
@@ -174,6 +188,37 @@ if submitted:
 
     st.markdown("### Recovery recommendation")
     st.markdown(rec)
+
+    # SHAP per-prediction explanation
+    if explainer is not None:
+        with st.expander("Why did the model predict this? (feature contributions)"):
+            try:
+                row = to_feature_row(
+                    parsed=parsed,
+                    personal_baseline=baseline_used,
+                    defaults=meta["feature_defaults"],
+                    feature_cols=meta["feature_cols"],
+                )
+                row_arr = np.array([row])
+                shap_values = explainer(row_arr)
+                shap_values.feature_names = meta["feature_cols"]
+
+                fig = plt.figure(figsize=(8, 5))
+                shap.plots.waterfall(shap_values[0], max_display=10, show=False)
+                plt.tight_layout()
+                st.pyplot(fig, use_container_width=True)
+                plt.close(fig)
+
+                st.caption(
+                    f"The plot starts at E[f(X)] = {explainer.expected_value:.2f} "
+                    f"(the average RPE in training data) and shows how each feature "
+                    f"pushed the prediction up (red) or down (blue) to reach "
+                    f"{float(model.predict(row_arr)[0]):.2f}. Personal baseline typically "
+                    "dominates — workout features make smaller adjustments on top."
+                )
+            except Exception as e:
+                st.caption(f"Couldn't render feature contributions: {e}")
+
 
     # Transparency: show what the AI extracted
     with st.expander("What did the AI parse from your description?"):
